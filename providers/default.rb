@@ -13,6 +13,10 @@ require 'rubygems'
 require 'rest_client'
 require 'json'
 
+def whyrun_supported?
+  true
+end
+
 def load_current_resource
   @current_resource = Chef::Resource::OpsviewClient.new(@new_resource.name)
   @current_resource.data(@new_resource.data)
@@ -166,12 +170,14 @@ def get_create_attributes(attributes)
     raise "Failed to create host because a host_attribute was missing a name : #{x.to_json}" if not x.include? 'name'
     if not existing_attributes.include? x['name'] then
       begin
-        @response = RestClient.put [@new_resource.server_url, 'config', 'attribute'].join('/'),
-          {"name" => x["name"]}.to_json,
-          :x_opsview_username => @new_resource.username,
-          :x_opsview_token => @token,
-          :content_type => :json,
-          :accept => :json
+        converge_by "create new opsview host attribute #{x["name"]}" do
+          @response = RestClient.put [@new_resource.server_url, 'config', 'attribute'].join('/'),
+            {"name" => x["name"]}.to_json,
+            :x_opsview_username => @new_resource.username,
+            :x_opsview_token => @token,
+            :content_type => :json,
+            :accept => :json
+        end
       rescue => @e
         raise "Could not reach opsview at #{@new_resource.server_url} to create attribute #{x.to_json}. #{@e}."
       end
@@ -212,13 +218,20 @@ def action_create
   @new_data = @current_resource.data.merge(@payload)
   if @current_resource.data.diff(@new_data).length > 0
     Chef::Log.debug("Identified a difference in the new opsview_client config of #{@current_resource.data.diff(@new_data)}.to_json}")
+    description = []
+    description << "update opsview settings for #{@payload['name']}"
+    diff_output_threshold = Chef::Config[:diff_output_threshold]
+    diff_output = JSON.pretty_generate(@current_resource.data.diff(@new_data)).split("\n")
+    description << (diff_output.length < diff_output_threshold ? diff_output : ["(long diff of over #{diff_output_threshold} characters, diff output suppressed)"])
     begin
-      @response = RestClient.put @url_parts.join('/'),
-        @payload.to_json,
-        :x_opsview_username => @new_resource.username,
-        :x_opsview_token => @token,
-        :content_type => :json,
-        :accept => :json
+      converge_by description do
+        @response = RestClient.put @url_parts.join('/'),
+          @payload.to_json,
+          :x_opsview_username => @new_resource.username,
+          :x_opsview_token => @token,
+          :content_type => :json,
+          :accept => :json
+      end
     rescue => @e
       raise "Could not reach opsview at #{@new_resource.server_url} during host creation. #{@e}."
     end
