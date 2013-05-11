@@ -23,6 +23,7 @@ def load_current_resource
   @current_resource.username(@new_resource.username)
   @current_resource.password(@new_resource.password)
   @current_resource.ipaddress(@new_resource.ipaddress)
+  @current_resource.host_attributes(@new_resource.host_attributes)
   
   @token ||= get_token
 
@@ -146,19 +147,62 @@ def get_ref_hash(object_type, name)
   end
 end
 
+def get_create_attributes(attributes)
+  filter = {"-or" => 
+               attributes.map {|x| {"name" => {"=" => x['name']}} if x.include? 'name'}.compact
+           }
+  begin
+    @response = RestClient.get [@new_resource.server_url, 'config', 'attribute'].join('/'),
+      :x_opsview_username => @new_resource.username,
+      :x_opsview_token => @token,
+      :content_type => :json,
+      :accept => :json,
+      :params => {:json_filter => filter.to_json}
+  rescue => @e
+    raise "Could not reach opsview at #{@new_resource.server_url} to fetch attributes with the filter #{filter.to_json}. #{@e}."
+  end
+  existing_attributes = JSON.parse(@response.body)['list'].map {|x| x['name']}.compact
+  attributes.each do |x|
+    raise "Failed to create host because a host_attribute was missing a name : #{x.to_json}" if not x.include? 'name'
+    if not existing_attributes.include? x['name'] then
+      begin
+        @response = RestClient.put [@new_resource.server_url, 'config', 'attribute'].join('/'),
+          {"name" => x["name"]}.to_json,
+          :x_opsview_username => @new_resource.username,
+          :x_opsview_token => @token,
+          :content_type => :json,
+          :accept => :json
+      rescue => @e
+        raise "Could not reach opsview at #{@new_resource.server_url} to create attribute #{x.to_json}. #{@e}."
+      end
+    end
+  end 
+end
+
 def action_create
   @url_parts = [@new_resource.server_url, 'config', 'host']
   if @current_resource.data.include? 'id'
     @url_parts << @current_resource.data['id']
   end
 
+  if @new_resource.host_attributes.length > 0 then
+    get_create_attributes @new_resource.host_attributes
+  end
+
+  # We're merging the arg1-4=>nil hash in, in case the user didn't provide
+  # all the args. This will prevent the comparison of old and new to giving
+  # a false mismatch due to missing arguments
+
   @payload = {
     "name" => (node[:fqdn] or node[:hostname]),
     "ip"=> node[:ipaddress],
     "hostgroup"=> get_ref_hash('hostgroup', @new_resource.host_group),
     "hosttemplates" => @new_resource.host_templates.map {|x| get_ref_hash('hosttemplate', x)}.compact,
-    "check_period" => get_ref_hash('timeperiod', @new_resource.check_period)
+    "check_period" => get_ref_hash('timeperiod', @new_resource.check_period),
+    "hostattributes" => @new_resource.host_attributes.map {|x| {'arg1'=>nil, 'arg2'=>nil, 'arg3'=>nil, 'arg4'=>nil}.merge(x)}.compact
   }
+
+
   Chef::Log.debug("Opsview host creation payload : #{@payload.to_json}")
 
   # Here we merge the @current_resource and @payload into @new_data
@@ -167,6 +211,7 @@ def action_create
   # reload
   @new_data = @current_resource.data.merge(@payload)
   if @current_resource.data.diff(@new_data).length > 0
+    Chef::Log.debug("Identified a difference in the new opsview_client config of #{@current_resource.data.diff(@new_data)}.to_json}")
     begin
       @response = RestClient.put @url_parts.join('/'),
         @payload.to_json,
