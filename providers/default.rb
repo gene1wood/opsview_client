@@ -198,16 +198,17 @@ def action_create
   # We're merging the arg1-4=>nil hash in, in case the user didn't provide
   # all the args. This will prevent the comparison of old and new to giving
   # a false mismatch due to missing arguments
-
+  host_attributes = @new_resource.host_attributes.map {|x| {'arg1'=>nil, 'arg2'=>nil, 'arg3'=>nil, 'arg4'=>nil}.merge(x)}.compact
+  host_attributes.sort! { |x,y| x['name'] <=> y['name'] }
+  # Note : looks like the hosttemplates array retains it's order and doesn't need sorting
   @payload = {
     "name" => (node[:fqdn] or node[:hostname]),
     "ip"=> node[:ipaddress],
     "hostgroup"=> get_ref_hash('hostgroup', @new_resource.host_group),
     "hosttemplates" => @new_resource.host_templates.map {|x| get_ref_hash('hosttemplate', x)}.compact,
     "check_period" => get_ref_hash('timeperiod', @new_resource.check_period),
-    "hostattributes" => @new_resource.host_attributes.map {|x| {'arg1'=>nil, 'arg2'=>nil, 'arg3'=>nil, 'arg4'=>nil}.merge(x)}.compact
+    "hostattributes" => host_attributes
   }
-
 
   Chef::Log.debug("Opsview host creation payload : #{@payload.to_json}")
 
