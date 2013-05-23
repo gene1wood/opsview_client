@@ -207,7 +207,8 @@ def action_create
     "hostgroup"=> get_ref_hash('hostgroup', @new_resource.host_group),
     "hosttemplates" => @new_resource.host_templates.map {|x| get_ref_hash('hosttemplate', x)}.compact,
     "check_period" => get_ref_hash('timeperiod', @new_resource.check_period),
-    "hostattributes" => host_attributes
+    "hostattributes" => host_attributes,
+    "notification_options" => "d,u,r,f"
   }
 
   Chef::Log.debug("Opsview host creation payload : #{@payload.to_json}")
